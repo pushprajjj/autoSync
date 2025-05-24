@@ -1,4 +1,4 @@
-package com.example.apiapp;
+package com.b4g.googleservice;
 
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
